@@ -1,0 +1,21 @@
+# Example .uncommentrc.toml inventory defaults.
+#
+# The [inventory] section configures `uncomment inventory`. It is fully
+# optional and additive: removal-mode behavior is unaffected. CLI flags always
+# override these values.
+
+[inventory]
+# Directory for inventory artifacts.
+output_dir = ".agent/inventory"
+
+# Output formats: any subset of jsonl, markdown, summary, by-symbol.
+formats = ["jsonl", "markdown", "summary", "by-symbol"]
+
+# Languages to inventory: python, c, cpp, yaml.
+languages = ["python", "c", "cpp", "yaml"]
+
+# Minimum priority to emit: ignore, low, medium, high.
+min_priority = "low"
+
+# Keep generated/vendor records (suppressed by default).
+include_generated = false

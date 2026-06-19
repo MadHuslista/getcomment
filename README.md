@@ -237,6 +237,55 @@ The crate ships development binaries for benchmarking and profiling, but they ar
   cargo run --release --features bench-tools --bin profile -- /path/to/repo
   ```
 
+## Inventory Mode
+
+`uncomment inventory` is the inverse of removal: it never modifies source files,
+and instead emits a structured, scored inventory of comments, docstrings, and
+YAML/Hydra configuration facts for Python, C/C++, and YAML. The artifacts are
+designed for retrieval tooling and LLM agents auditing documentation drift.
+
+```bash
+# Inventory the current tree into .agent/inventory (default)
+uncomment inventory .
+
+# Choose output dir, formats, and languages
+uncomment inventory . \
+  --output-dir .agent/inventory \
+  --format jsonl,markdown,summary,by-symbol \
+  --languages python,c,cpp,yaml
+
+# Keep generated/vendor records (suppressed by default) and lower the floor
+uncomment inventory firmware/ --include-generated --min-priority ignore
+```
+
+### Outputs
+
+| File                                 | Contents                                                                 |
+| ------------------------------------ | ------------------------------------------------------------------------ |
+| `comments_docstrings.jsonl`          | One JSON record per evidence item (stable schema `comment-inventory.v1`) |
+| `comments_docstrings.md`             | Retrieval-optimized Markdown, one section per record                     |
+| `comments_docstrings_summary.md`     | Counts by language, priority, claim type, marker, file origin            |
+| `comments_docstrings_by_symbol.json` | Records grouped by symbol / key path                                     |
+| `inventory_manifest.json`            | Run metadata (only `generated_at` is nondeterministic)                   |
+
+### Flags
+
+- `--output-dir <path>` — artifact directory (default `.agent/inventory`)
+- `--format <list>` — any of `jsonl,markdown,summary,by-symbol` (default first three)
+- `--languages <list>` — any of `python,c,cpp,yaml`
+- `--min-priority <ignore|low|medium|high>` — minimum priority to emit (default `low`)
+- `--include-generated` — keep generated/vendor records (down-ranked and suppressed by default)
+- `--include-low-priority` — emit `ignore`-priority records too
+- `--no-yaml-values` — skip active YAML key/value facts (comments only)
+- `--no-gitignore`, `--threads <n>` — same semantics as removal mode
+
+Each record carries `score`, `priority`, and `score_reasons` from deterministic
+rules, plus language context (Python scope/docstring sections, C/C++ Doxygen
+target attachment and USER CODE regions, YAML key paths and interpolations). See
+`docs/output-contract.md` for the full schema. Defaults can be set under an
+`[inventory]` section in `.uncommentrc.toml` (CLI flags take precedence); see
+`examples/inventory.toml`.
+
 ## Contributing
 
 See `CONTRIBUTING.md` for local development, automation hooks, and release procedures.
