@@ -39,6 +39,36 @@ pub struct Config {
 
     #[serde(default)]
     pub patterns: HashMap<String, PatternConfig>,
+
+    /// Optional inventory-mode defaults. Additive and backward compatible:
+    /// absent `[inventory]` sections deserialize to `None` and change nothing
+    /// about the removal pipeline (NFR-005).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inventory: Option<InventoryConfig>,
+}
+
+/// Defaults for `uncomment inventory`, overridable by CLI flags.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct InventoryConfig {
+    /// Output directory for inventory artifacts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_dir: Option<String>,
+
+    /// Output formats (`jsonl`, `markdown`, `summary`, `by-symbol`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub formats: Vec<String>,
+
+    /// Languages to inventory (`python`, `c`, `cpp`, `yaml`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub languages: Vec<String>,
+
+    /// Minimum priority to emit (`ignore`, `low`, `medium`, `high`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_priority: Option<String>,
+
+    /// Include generated/vendor records (suppressed by default).
+    #[serde(default)]
+    pub include_generated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

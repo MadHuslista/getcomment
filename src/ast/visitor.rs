@@ -108,6 +108,16 @@ impl<'a> CommentVisitor<'a> {
         }
     }
 
+    /// All collected comments, including those that would be preserved.
+    ///
+    /// Exposed for inventory-style consumers; the removal pipeline uses
+    /// [`Self::get_comments_to_remove`] instead.
+    #[must_use]
+    #[allow(dead_code)]
+    pub fn comments(&self) -> &[CommentInfo] {
+        &self.comments
+    }
+
     #[must_use]
     pub fn get_comments_to_remove(&self) -> Vec<&CommentInfo> {
         self.comments

@@ -1,3 +1,5 @@
+use crate::inventory::InventoryFormat;
+use crate::inventory::model::Priority;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -40,6 +42,84 @@ pub enum Commands {
         #[arg(short, long, help = "Interactive mode to select languages and options")]
         interactive: bool,
     },
+
+    /// ~keep Emit a non-destructive inventory of comments, docstrings, and config facts
+    #[command(about = "Extract a structured comment/docstring/config inventory (read-only)")]
+    Inventory(InventoryArgs),
+}
+
+#[derive(Parser, Debug)]
+pub struct InventoryArgs {
+    /// ~keep Files, directories, or glob patterns to inventory
+    #[arg(help = "Files, directories, or glob patterns to inventory")]
+    pub paths: Vec<String>,
+
+    /// ~keep Output directory for inventory artifacts
+    #[arg(long = "output-dir", default_value = ".agent/inventory")]
+    pub output_dir: PathBuf,
+
+    /// ~keep Output formats (comma-separated)
+    #[arg(
+        long,
+        value_delimiter = ',',
+        default_value = "jsonl,markdown,summary",
+        help = "Output formats: jsonl,markdown,summary,by-symbol"
+    )]
+    pub format: Vec<InventoryFormat>,
+
+    /// ~keep Languages to inventory (comma-separated)
+    #[arg(
+        long,
+        value_delimiter = ',',
+        default_value = "python,c,cpp,yaml",
+        help = "Languages to inventory: python,c,cpp,yaml"
+    )]
+    pub languages: Vec<String>,
+
+    /// ~keep Minimum priority to emit
+    #[arg(long = "min-priority", value_enum, default_value = "low")]
+    pub min_priority: Priority,
+
+    /// ~keep Include generated/vendor records (suppressed by default)
+    #[arg(long = "include-generated", help = "Include generated/vendor records")]
+    pub include_generated: bool,
+
+    /// ~keep Include records below the minimum priority
+    #[arg(
+        long = "include-low-priority",
+        help = "Emit ignore-priority records too"
+    )]
+    pub include_low_priority: bool,
+
+    /// ~keep Do not emit active YAML value facts (comments only)
+    #[arg(long = "no-yaml-values", help = "Skip active YAML key/value facts")]
+    pub no_yaml_values: bool,
+
+    /// ~keep Process files ignored by .gitignore
+    #[arg(long = "no-gitignore", help = "Process files ignored by .gitignore")]
+    pub no_gitignore: bool,
+
+    /// ~keep Number of parallel threads (0 = auto-detect)
+    #[arg(short = 'j', long = "threads", default_value = "1")]
+    pub threads: usize,
+}
+
+impl InventoryArgs {
+    #[must_use]
+    pub fn into_options(self) -> crate::inventory::InventoryOptions {
+        crate::inventory::InventoryOptions {
+            paths: self.paths,
+            output_dir: self.output_dir,
+            formats: self.format,
+            languages: self.languages,
+            min_priority: self.min_priority,
+            include_generated: self.include_generated,
+            include_low_priority: self.include_low_priority,
+            include_yaml_values: !self.no_yaml_values,
+            respect_gitignore: !self.no_gitignore,
+            threads: self.threads,
+        }
+    }
 }
 
 #[derive(Parser, Debug)]
