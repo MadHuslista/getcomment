@@ -1,0 +1,13 @@
+streams:
+  reference:
+    # Reference stream nominal rate.
+    nominal_srate_hz: 500
+  emg:
+    nominal_srate_hz: 2000
+
+# Authoritative source of truth for the device mode.
+mode: active_send  # modbus_rtu | active_send
+
+fit:
+  selection:
+    primary_metric: rmse

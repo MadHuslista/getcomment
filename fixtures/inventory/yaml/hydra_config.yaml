@@ -1,0 +1,16 @@
+# @package bridge
+
+defaults:
+  - logging: default
+  - _self_
+
+# batch_end_anchored prevents synthetic clock drift.
+timestamp_policy: batch_end_anchored
+
+mode: active_send  # modbus_rtu | active_send
+
+excluded_ports:
+  # - /dev/ttyUSB0
+
+logging:
+  file: ${hydra:run.dir}/run.log
