@@ -102,7 +102,7 @@ fn build_docstring(
         raw_text: raw_text.to_string(),
     });
 
-    let sections = parse_sections(&record.normalized_text);
+    let sections = parse_sections(raw_text);
     record.scope_type = Some(scope_type.clone());
     record.scope_name = scope_name.clone();
     record.qualified_symbol = qualified;
@@ -286,34 +286,125 @@ fn parse_doxygen_tags(raw: &str) -> Vec<DoxygenTag> {
 }
 
 /// Parse docstring sections into a header -> body map.
-fn parse_sections(normalized: &str) -> std::collections::BTreeMap<String, String> {
+///
+/// Handles three flavors: reST directives (`.. note::`), inline `Header: text`
+/// (Google one-liners collapsed onto a single line), and block sections — both
+/// NumPy underline (`Parameters` over a `----` rule) and Google block (`Args:`
+/// on its own line followed by an indented body).
+fn parse_sections(raw: &str) -> std::collections::BTreeMap<String, String> {
     let mut sections = std::collections::BTreeMap::new();
-    // reST directive form: ".. note:: text"
-    if let Some(idx) = normalized.find(".. note::") {
-        let text = normalized[idx + ".. note::".len()..].trim();
-        if !text.is_empty() {
-            sections.insert("Notes".to_string(), first_sentence(text));
+    let cleaned = strip_docstring_quotes(raw);
+    parse_inline_sections(cleaned, &mut sections);
+    parse_block_sections(cleaned, &mut sections);
+    sections
+}
+
+/// reST directives and single-line `Header: text` forms.
+fn parse_inline_sections(text: &str, sections: &mut std::collections::BTreeMap<String, String>) {
+    if let Some(idx) = text.find(".. note::") {
+        let body = first_line(text[idx + ".. note::".len()..].trim());
+        if !body.is_empty() {
+            sections
+                .entry("Notes".to_string())
+                .or_insert_with(|| first_sentence(&body));
         }
     }
-    if let Some(idx) = normalized.find(".. warning::") {
-        let text = normalized[idx + ".. warning::".len()..].trim();
-        if !text.is_empty() {
-            sections.insert("Warnings".to_string(), first_sentence(text));
+    if let Some(idx) = text.find(".. warning::") {
+        let body = first_line(text[idx + ".. warning::".len()..].trim());
+        if !body.is_empty() {
+            sections
+                .entry("Warnings".to_string())
+                .or_insert_with(|| first_sentence(&body));
         }
     }
-    // Header form: "Returns: text" / "Args: text".
+    // Single-line "Header: text" (skip a bare "Header:" — that is a block form).
     for header in SECTION_HEADERS {
         let needle = format!("{header}:");
-        if let Some(idx) = normalized.find(&needle) {
-            let text = normalized[idx + needle.len()..].trim();
-            if !text.is_empty() {
+        if let Some(idx) = text.find(&needle) {
+            let rest = first_line(text[idx + needle.len()..].trim());
+            if !rest.is_empty() {
                 sections
                     .entry(canonical_section(header))
-                    .or_insert_with(|| first_sentence(text));
+                    .or_insert_with(|| first_sentence(&rest));
             }
         }
     }
-    sections
+}
+
+/// NumPy underline (`Parameters` / `-----`) and Google block (`Args:`) sections.
+fn parse_block_sections(text: &str, sections: &mut std::collections::BTreeMap<String, String>) {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        let Some(header) = section_header(lines[i]) else {
+            i += 1;
+            continue;
+        };
+        let numpy = i + 1 < lines.len() && is_underline(lines[i + 1]);
+        let google = lines[i].trim().ends_with(':');
+        if !numpy && !google {
+            i += 1;
+            continue;
+        }
+        let mut j = if numpy { i + 2 } else { i + 1 };
+        let mut body = Vec::new();
+        while j < lines.len() {
+            let line = lines[j].trim();
+            if line.is_empty() || is_block_header(&lines, j) {
+                break;
+            }
+            body.push(line);
+            j += 1;
+        }
+        if !body.is_empty() {
+            sections
+                .entry(canonical_section(header))
+                .or_insert_with(|| first_sentence(&body.join(" ")));
+        }
+        i = j.max(i + 1);
+    }
+}
+
+/// The matched section header for a line, if the line is exactly a header
+/// (bare or with a trailing colon), case-insensitively.
+fn section_header(line: &str) -> Option<&'static str> {
+    let bare = line.trim().strip_suffix(':').unwrap_or(line.trim()).trim();
+    SECTION_HEADERS
+        .iter()
+        .copied()
+        .find(|h| bare.eq_ignore_ascii_case(h))
+}
+
+/// True when line `idx` begins a new block section (NumPy underline or Google).
+fn is_block_header(lines: &[&str], idx: usize) -> bool {
+    section_header(lines[idx]).is_some()
+        && (lines[idx].trim().ends_with(':')
+            || (idx + 1 < lines.len() && is_underline(lines[idx + 1])))
+}
+
+fn is_underline(line: &str) -> bool {
+    let t = line.trim();
+    t.len() >= 3 && t.chars().all(|c| c == '-')
+}
+
+fn first_line(text: &str) -> String {
+    text.lines().next().unwrap_or("").trim().to_string()
+}
+
+/// Strip surrounding triple/single quote delimiters, preserving interior lines.
+fn strip_docstring_quotes(raw: &str) -> &str {
+    let s = raw.trim();
+    let s = s
+        .strip_prefix("r")
+        .or_else(|| s.strip_prefix("R"))
+        .unwrap_or(s);
+    let s = s
+        .strip_prefix("\"\"\"")
+        .or_else(|| s.strip_prefix("'''"))
+        .unwrap_or(s);
+    s.strip_suffix("\"\"\"")
+        .or_else(|| s.strip_suffix("'''"))
+        .unwrap_or(s)
 }
 
 fn canonical_section(header: &str) -> String {
@@ -359,6 +450,26 @@ mod tests {
             "Adaptive drift corrector. .. note:: Not used in the default configuration.",
         );
         assert!(s.contains_key("Notes"));
+    }
+
+    #[test]
+    fn numpy_underline_sections_parsed() {
+        // GAP-3: NumPy underline headers must populate docstring_sections.
+        let raw = "\"\"\"Configure the package-root logger.\n\n    Parameters\n    ----------\n    level:\n        Console verbosity. One of DEBUG, INFO.\n    \"\"\"";
+        let s = parse_sections(raw);
+        assert!(s.contains_key("Parameters"), "sections: {s:?}");
+        assert!(s["Parameters"].contains("level"));
+    }
+
+    #[test]
+    fn google_block_sections_parsed() {
+        let raw = "\"\"\"Do a thing.\n\n    Args:\n        level: the verbosity.\n\n    Returns:\n        nothing useful.\n    \"\"\"";
+        let s = parse_sections(raw);
+        assert!(
+            s.contains_key("Parameters"),
+            "Args canonicalizes to Parameters"
+        );
+        assert!(s.contains_key("Returns"));
     }
 
     #[test]
