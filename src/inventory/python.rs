@@ -118,6 +118,7 @@ fn build_docstring(
     let attached = match scope_type.as_str() {
         "class" => AttachedKind::Class,
         "function" | "method" => AttachedKind::Function,
+        "module" => AttachedKind::Module,
         _ => AttachedKind::None,
     };
     collector::apply_score(&mut record, attached, file_origin, false);

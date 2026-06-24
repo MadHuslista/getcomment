@@ -379,7 +379,8 @@ logging.file value + interpolation hydra:run.dir
 Base:
 
 ```text
-docstring attached to public symbol        +3
+docstring attached to function/class/method +3
+docstring attached to module                +3
 comment attached to function/class/macro   +2
 inline/local comment                       +1
 YAML active config fact                    +2

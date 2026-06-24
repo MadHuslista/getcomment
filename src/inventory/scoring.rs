@@ -13,6 +13,8 @@ pub enum AttachedKind {
     None,
     /// Inline or local comment with no symbol attachment.
     Local,
+    /// A module-level docstring (no enclosing class/function).
+    Module,
     Function,
     Class,
     Macro,
@@ -52,9 +54,13 @@ pub fn classify_and_score(record: &InventoryRecord, ctx: &ScoreContext) -> Score
 
     // --- Base attachment ---------------------------------------------------
     match ctx.attached_kind {
+        AttachedKind::Module if record.kind == EvidenceKind::Docstring => {
+            score += 3;
+            reasons.push("docstring attached to module".into());
+        }
         AttachedKind::Function | AttachedKind::Class if record.kind == EvidenceKind::Docstring => {
             score += 3;
-            reasons.push("docstring attached to public symbol".into());
+            reasons.push("docstring attached to function/class/method".into());
         }
         AttachedKind::Function
         | AttachedKind::Class
@@ -72,7 +78,8 @@ pub fn classify_and_score(record: &InventoryRecord, ctx: &ScoreContext) -> Score
             score += 1;
             reasons.push("inline/local comment".into());
         }
-        AttachedKind::None => {}
+        // A module attachment only carries score for docstrings (handled above).
+        AttachedKind::Module | AttachedKind::None => {}
     }
 
     // --- Markers -----------------------------------------------------------
@@ -373,6 +380,42 @@ mod tests {
         let s = classify_and_score(&r, &ctx(AttachedKind::Macro));
         assert!(s.claim_types.contains(&"model_parameter".to_string()));
         assert_eq!(s.priority, Priority::High);
+    }
+
+    #[test]
+    fn module_docstring_gets_base_bonus() {
+        // GAP-1: a plain module docstring with no domain/semantic trigger words
+        // must still reach the low tier (>=3) by default, not fall to ignore.
+        let mut r = base();
+        r.language = "python".into();
+        r.kind = EvidenceKind::Docstring;
+        r.normalized_text = "What this file does.".into();
+        let s = classify_and_score(&r, &ctx(AttachedKind::Module));
+        assert_eq!(s.score, 3, "module docstring base score");
+        assert_eq!(s.priority, Priority::Low);
+        assert!(
+            s.score_reasons
+                .contains(&"docstring attached to module".to_string())
+        );
+    }
+
+    #[test]
+    fn function_docstring_reason_is_scope_neutral() {
+        // GAP-8: reason must not claim "public symbol" for private functions.
+        let mut r = base();
+        r.language = "python".into();
+        r.kind = EvidenceKind::Docstring;
+        r.normalized_text = "Helper.".into();
+        let s = classify_and_score(&r, &ctx(AttachedKind::Function));
+        assert!(
+            s.score_reasons
+                .contains(&"docstring attached to function/class/method".to_string())
+        );
+        assert!(
+            !s.score_reasons
+                .iter()
+                .any(|reason| reason.contains("public symbol"))
+        );
     }
 
     #[test]
