@@ -160,9 +160,16 @@ impl<'a> Walker<'a> {
             return;
         }
 
-        // Commented-out example/option under an active key.
+        // Commented-out example/option under an active key. Only split a line
+        // out as a standalone example when it is *not* continuing an existing
+        // leading-comment block: an interior prose line with a mid-sentence ':'
+        // must stay part of the contiguous block, not be reclassified (GAP-7).
         let looks_like_yaml = body.starts_with('-') || find_key_colon(body).is_some();
-        if looks_like_yaml && !self.stack.is_empty() && indent > 0 {
+        if looks_like_yaml
+            && self.pending_leading.is_empty()
+            && !self.stack.is_empty()
+            && indent > 0
+        {
             let parent = self.current_path();
             let yaml = YamlFields {
                 config_system: self.config_system(),
@@ -536,6 +543,37 @@ mod tests {
         assert!(recs.iter().any(|r| r.yaml.as_ref().is_some_and(
             |y| y.is_commented_example && y.key_path == Some("excluded_ports".into())
         )));
+    }
+
+    #[test]
+    fn multiline_leading_block_not_split_by_interior_colon() {
+        // GAP-7: a two-line prose leading block whose second line has a
+        // mid-sentence ':' must join as one leading_comment on the next key,
+        // not be split into a stray commented-example record.
+        let src = "xy_correlation:\n  # false = adaptive autoscale on every refresh.\n  # true  = only zoom out: preserve the largest observed span.\n  lock_max_span: false\n";
+        let recs = run(src);
+        let target = recs
+            .iter()
+            .find(|r| {
+                r.yaml.as_ref().and_then(|y| y.key_path.clone()).as_deref()
+                    == Some("xy_correlation.lock_max_span")
+            })
+            .expect("lock_max_span record present");
+        let leading = target
+            .yaml
+            .as_ref()
+            .unwrap()
+            .leading_comment
+            .as_deref()
+            .unwrap();
+        assert!(leading.contains("adaptive autoscale"), "first line joined");
+        assert!(leading.contains("only zoom out"), "second line joined");
+        assert!(
+            !recs
+                .iter()
+                .any(|r| r.yaml.as_ref().is_some_and(|y| y.is_commented_example)),
+            "no stray commented-example record"
+        );
     }
 
     #[test]
