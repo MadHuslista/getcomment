@@ -2,12 +2,12 @@
 
 ---
 - **Creation Date**: 2026-06-19
-- **Last Updated** : 2026-06-20
-- **Branch@Commit**: local@49e0242
+- **Last Updated** : 2026-06-24
+- **Branch@Commit**: local@051d851
 - **Scope**: Evaluation of `uncomment inventory` MVP run against two representative libraries from the `madhus.project.handgrip` corpus — `Handgrip_Calibration` (pure Python + bare Hydra YAML) and `LSL_Viewer` (Python + heavily-commented Hydra YAML) — cloned read-only at `tests/integration_test/repos_cache/handgrip-calibration/` (branch `tmain`) per `scripts/fetch-inventory-corpus.sh`.
 - **Purpose**: Validate the MVP against the intended-usage workflow (evidence generation → agent ingest → priority triage → downstream contradiction audit) and produce concrete, reproducible gap findings for follow-up issues.
-- **Claude Plan Path**: /home/levi/.claude/plans/wondrous-sparking-hamming.md
-- **Version**: 1.1
+- **Claude Plan Path**: /home/levi/.claude/plans/purrfect-conjuring-quiche.md
+- **Version**: 1.3
 ---
 
 ## 1. What was measured and why
@@ -38,25 +38,31 @@ This evaluation checks whether the artifacts actually generated against a real, 
 
 ```
 files_scanned: 48
-files_with_records: 40
-records: 1914
+files_with_records: 41
+records: 1924
 errors: []
 ```
 
-48 ≈ 35 `.py` + 13 `conf/*.yaml` files in the library (no C/C++ subject matter present, correctly reflected as zero C/C++ records despite being requested).
+48 ≈ 35 `.py` + 13 `conf/*.yaml` files in the library (no C/C++ subject matter present, correctly reflected as zero C/C++ records despite being requested). (Numbers are the v1.3 current-source run, `local@051d851`; the original v1.0 baseline run reported 40 files-with-records / 1914 records before the GAP fixes landed — see the resolution banner in §4 for the before→after delta.)
 
 ### 3.2 Summary breakdown
 
 ```
-by language:  yaml 1633, python 281
-by priority:  medium 1614, low 234, high 66
+by language:  yaml 1633, python 291
+by priority:  medium 1613, low 241, high 70
 by claim type: configuration_fact 1633, runtime_default 1633,
                protocol_schema_contract 768, contract_claim 114,
-               test_intent 4, risk_workaround_marker 1
-by marker:     WARNING 1
-by file origin: local 1904, test_harness 10
+               test_intent 5, implementation_rationale 2
+by marker:     (none)
+by file origin: local 1913, test_harness 11
 generated/vendor suppressed: 0
 ```
+
+(v1.3 current-source run. Deltas vs the v1.0 pre-fix baseline: python 281 → 291 — the
+ten module-scope docstrings GAP-1 used to filter now surface; `by marker: WARNING 1` →
+`(none)` — the GAP-2 code-span false positive is gone; `risk_workaround_marker 1` drops
+out with it; `implementation_rationale 2` is newly populated from GAP-3 docstring-section
+parsing.)
 
 ### 3.3 Output-contract compliance
 
@@ -68,7 +74,7 @@ Confirmed: `.uncommentrc.toml`'s `[inventory]` table sets the same fields the CL
 
 ### 3.5 Recall — Python docstrings
 
-AST ground truth: **130** docstrings across the library. Tool emitted: **120** `kind: docstring` records. **Recall: 92.3%** (120/130).
+AST ground truth: **130** docstrings across the library. v1.0 baseline emitted **120** `kind: docstring` records at default settings (recall 92.3%, 120/130) — the 10 missing were module-scope docstrings filtered by `min_priority=low` (GAP-1, a scoring gap, not extraction). On the v1.3 current-source run the GAP-1 module-scope base bonus lifts all of them above the filter: tool emits **130** `kind: docstring` records, **recall 100% (130/130)** at default settings.
 
 ### 3.6 Confirmed-working features
 
@@ -86,21 +92,59 @@ AST ground truth: **130** docstrings across the library. Tool emitted: **120** `
 ```
 files_scanned: 33  (32 .py + 1 conf/config.yaml)
 files_with_records: 26
-records: 278
-by language:  python 240, yaml 38
-by priority:  low 228, medium 43, high 7
+records: 280
+by language:  python 243, yaml 37
+by priority:  low 225, medium 48, high 7
 by claim type: contract_claim 166, configuration_fact 37, runtime_default 37,
-               test_intent 22, protocol_schema_contract 21,
-               timing_synchronization_policy 9, allowed_values 1, operator_guidance 1
+               test_intent 25, protocol_schema_contract 21,
+               timing_synchronization_policy 9, allowed_values 1
 by marker:     (none)
-by file origin: local 243, test_harness 35
+by file origin: local 242, test_harness 38
 ```
 
-Python docstring recall here: AST ground truth = 25, tool (`kind: docstring`) = 22 at default settings — same apparent shortfall pattern as the first corpus, investigated together with it below (GAP-1).
+(v1.3 current-source run. Deltas vs the v1.1 pre-fix run: `operator_guidance 1` is gone —
+that record was the GAP-7 stray, mis-split `lock_max_span` comment line, now folded back
+into its parent's single `leading_comment`; python record count rises 240 → 243 as the
+module-scope docstrings GAP-1 surfaces.)
+
+Python docstring recall here: AST ground truth = 25; v1.1 emitted 22 at default settings
+(88%, the same GAP-1 module-docstring shortfall as the first corpus). On the v1.3
+current-source run the tool emits **25** `kind: docstring` records, **recall 100% (25/25)**
+at default settings.
 
 ## 4. Gaps
 
 Each gap below is written to be directly usable as a tracked issue.
+
+> **Resolution status (v1.3, `local@051d851`)**: GAP-1, GAP-2, GAP-3, GAP-4, GAP-7, and
+> GAP-8 are **fixed** in the source and covered by unit + acceptance tests; the per-gap
+> "Resolution" notes below record what changed and how it was verified on this corpus.
+> GAP-5 was already resolved in v1.1; GAP-6 remains an observation (not a bug).
+>
+> **v1.3 — clean milestone re-run on current source.** The v1.2 resolution numbers were
+> captured mid-fix; v1.3 re-ran the full validation against `local@051d851` (release
+> binary rebuilt first) to confirm every fix reproduces on `HEAD`. Each fixed gap was
+> re-verified directly on this corpus, default settings unless noted:
+> - **GAP-1**: all 26 module-scope docstrings now carry the `+3 docstring attached to
+>   module` reason and clear the `low` filter; Python docstring recall is now **100%**
+>   (`Handgrip_Calibration` 130/130, `LSL_Viewer` 25/25), up from 92.3% / 88%.
+> - **GAP-2**: `by marker` is `(none)` on both corpora — the `logging_setup.py` WARNING
+>   false positive (and its `risk_workaround_marker` claim) is eliminated.
+> - **GAP-3**: `implementation_rationale` populated (2 records, `Handgrip_Calibration`)
+>   from parsed docstring sections.
+> - **GAP-4**: `LSL_Viewer` by-symbol output carries 8 dotted module keys
+>   (e.g. `LSL_Viewer.tests.unit.test_alignment`).
+> - **GAP-7**: `viewer.xy_correlation.lock_max_span` is a single record with both prose
+>   lines in one `leading_comment`; zero stray commented-example records remain under the
+>   parent key (the v1.1 `operator_guidance` record is gone).
+> - **GAP-8**: zero records carry the "public symbol" reason; 104 carry the scope-neutral
+>   "docstring attached to function/class/method".
+>
+> Re-run deltas (this corpus, default settings): `Handgrip_Calibration` records
+> 1914 → 1924 (+10 module docstrings now visible, +1 file-with-records), by-marker
+> `WARNING 1 → (none)`. `LSL_Viewer` records 278 → 280 with the `operator_guidance` stray
+> folded back into its parent's `leading_comment`. No errors in any manifest; all five
+> output-contract files present and well-formed on both runs.
 
 ---
 
@@ -140,6 +184,8 @@ Same pattern in `LSL_Viewer` (`--min-priority ignore`): `tests/e2e/test_cli.py` 
 
 **Severity downgraded from High to Medium**: the user-visible symptom (docstrings missing from default output) is real and still worth fixing, but it's a tunable scoring-weight gap, not data loss from a broken parser — `--include-low-priority` already provides a complete workaround today.
 
+**Resolution (v1.2)**: Added `AttachedKind::Module` (`src/inventory/scoring.rs`) with a +3 base bonus and reason `"docstring attached to module"`; `src/inventory/python.rs` maps module-scope docstrings to it. `docs/gap-analysis-current-vs-mvp.md` §7 now lists the module bonus. Verified: `Handgrip_Calibration` python records 281 → 291 at default settings (the previously-filtered module docstrings now surface). Unit test `module_docstring_gets_base_bonus`; acceptance test `module_docstring_scored_above_ignore_by_default`.
+
 ---
 
 ### GAP-2 (Medium) — Marker detection has no context/word-boundary guard, producing false positives
@@ -159,6 +205,8 @@ This is a parameter docstring enumerating valid log-level strings, not a warning
 
 **Impact**: inflates an unrelated record to `high` priority/score 15 — actively misleading for the priority-triage workflow this tool exists to support.
 
+**Resolution (v1.2)**: `src/inventory/text.rs` `markers()` now strips backtick-delimited inline-code spans (Markdown rule: an opening run of N backticks closes on the next run of exactly N, covering reST `` ``…`` `` and single `` `…` ``) before scanning. Verified: the `Handgrip_Calibration` by-marker count went from `WARNING 1` to `(none)` — the `logging_setup.py` false positive is gone. Unit test `markers_ignores_code_span_enumerations`; acceptance test `marker_not_flagged_inside_code_span`.
+
 ---
 
 ### GAP-3 (Low) — `docstring_sections` (structured NumPy/Google docstring parsing) is unimplemented
@@ -167,6 +215,8 @@ This is a parameter docstring enumerating valid log-level strings, not a warning
 
 **Status**: this matches `docs/gap-analysis-current-vs-mvp.md` Phase 5's "when easy" framing — it's explicitly optional for MVP, not a contract violation. Listed here as a ready next-iteration enhancement since real source data already exists to validate against.
 
+**Resolution (v1.2)**: `parse_sections` (`src/inventory/python.rs`) now parses the line-structured raw docstring instead of the whitespace-collapsed normalized text, and recognizes NumPy underline headers (`Parameters` over `----`) and Google block headers (`Args:` on its own line) in addition to the previous reST/inline forms. `implementation_rationale` (driven by populated sections) now appears in the `Handgrip_Calibration` claim census. Unit tests `numpy_underline_sections_parsed` / `google_block_sections_parsed`; acceptance test `numpy_docstring_sections_populated`.
+
 ---
 
 ### GAP-4 (Low) — `by_symbol` fallback naming for module docstrings is weak
@@ -174,6 +224,8 @@ This is a parameter docstring enumerating valid log-level strings, not a warning
 **Evidence**: `comments_docstrings_by_symbol.json` entries for module-level docstrings use `path:line` as the `symbol` key (e.g. `./Handgrip_Calibration/scripts/analyze_step_relaxation.py:2`) rather than a module-name-derived symbol (e.g. `handgrip_calibration.analyze_step_relaxation` or similar).
 
 **Impact**: minor — reduces the by-symbol lookup's usefulness specifically for module-level claims; doesn't affect JSONL/Markdown correctness.
+
+**Resolution (v1.2)**: `symbol_key` (`src/inventory/writers/by_symbol.rs`) now derives a dotted module symbol from the path (drop leading `./` and `src/`, strip `.py`) for module-scope Python docstrings before falling back to `path:line`. Verified on `LSL_Viewer`: module docstrings now key under e.g. `LSL_Viewer.tests.unit.test_alignment`. Unit tests `module_docstring_uses_dotted_path_symbol` / `module_symbol_drops_src_segment`; acceptance test `by_symbol_uses_module_derived_symbol`.
 
 ---
 
@@ -245,6 +297,8 @@ By contrast, other multi-line blocks in the same file join correctly (see GAP-5:
 
 **Impact**: data loss/misattachment — the `lock_max_span` claim is split across two records, one of which is filed under the wrong key path, reducing retrieval precision for exactly this kind of two-state documentation comment (a common pattern in this codebase's config).
 
+**Resolution (v1.2)**: `handle_comment_line` (`src/inventory/yaml.rs`) now skips the commented-out-example branch while a leading-comment block is already accumulating (`pending_leading` non-empty), so a contiguous block joins as one unit. Verified on `LSL_Viewer`: `viewer.xy_correlation.lock_max_span` now carries both prose lines in a single `leading_comment` with zero stray commented-example records. Unit test `multiline_leading_block_not_split_by_interior_colon`.
+
 ---
 
 ### GAP-8 (Low, cosmetic, new) — Score reason says "public symbol" even for private (`_`-prefixed) functions
@@ -257,15 +311,17 @@ Not score-incorrect under the MVP's documented scoring rules (`docs/gap-analysis
 
 **Suggested fix location**: wherever the reason string is generated alongside the +3 base bonus — reword to a scope-neutral phrase (e.g. `"docstring attached to function/class/method"`), or implement an actual public/private distinction if that's intended scoring behavior. Severity is low — purely a labeling clarity issue, no score/priority impact.
 
+**Resolution (v1.2)**: the function/class/method docstring reason in `src/inventory/scoring.rs` is now `"docstring attached to function/class/method"` (no score change). Unit test `function_docstring_reason_is_scope_neutral` asserts the string no longer claims "public symbol".
+
 ## 5. Conclusion
 
 The MVP substantially matches the PRD and `output-contract.md` for real mixed Python+YAML repositories: the full pipeline (discovery → tree-sitter extraction → scoring → multi-format export) runs end-to-end, deterministically, without touching source files, and config-driven runs are structurally equivalent to CLI-flag runs. This holds across two corpora with materially different shapes (`Handgrip_Calibration`: YAML-heavy, no YAML comments; `LSL_Viewer`: Python-heavy, richly-commented YAML).
 
 The second corpus run **corrected** the first report's most serious finding: GAP-1 is not a parser bug (extraction is sound for module docstrings of any line count) but a **scoring** gap — module-scope docstrings never receive the base "attached to symbol" bonus that function/class/method docstrings get, so most fall to `ignore` tier and are filtered by default `min_priority=low`. It also **confirmed** GAP-5 as working (AC-006 allowed-values-hint extraction validated exactly) and surfaced two new findings:
 
-- **GAP-1** (medium severity, corrected from "high/parser bug"): module docstrings systematically under-scored, mostly invisible by default — fixable in scoring rules, workaround (`--include-low-priority`) already exists.
-- **GAP-2** (medium severity): marker detection lacks context guards, producing a false-positive high-priority record.
-- **GAP-7** (medium severity, new): multi-line YAML leading-comment blocks can be incorrectly split/misattached when an interior line resembles a commented-out option.
-- **GAP-8** (low severity, new): cosmetic score-reason mislabeling for private functions.
+- **GAP-1** (medium severity, corrected from "high/parser bug"): module docstrings systematically under-scored, mostly invisible by default — **fixed** (module-scope +3 base bonus in scoring rules).
+- **GAP-2** (medium severity): marker detection lacks context guards, producing a false-positive high-priority record — **fixed** (code-span stripping before marker scan).
+- **GAP-7** (medium severity, new): multi-line YAML leading-comment blocks can be incorrectly split/misattached when an interior line resembles a commented-out option — **fixed** (contiguous block kept whole).
+- **GAP-8** (low severity, new): cosmetic score-reason mislabeling for private functions — **fixed** (scope-neutral reason string).
 
-GAP-3 and GAP-4 remain enhancement opportunities; GAP-6 is now a narrowed observation (priority skew is YAML-heavy-corpus-specific, not universal) rather than a general limitation.
+All six actionable gaps (GAP-1/2/3/4/7/8) are **fixed** and covered by unit + acceptance tests; GAP-3 (NumPy/Google docstring section parsing) and GAP-4 (by-symbol module naming) were closed alongside the medium-severity fixes. GAP-5 was confirmed working in v1.1; GAP-6 remains a narrowed observation (priority skew is YAML-heavy-corpus-specific, not universal) rather than a general limitation. **v1.3 re-ran the full validation against `local@051d851` (release binary rebuilt first) and confirms every fix reproduces cleanly on `HEAD`** — Python docstring recall is now 100% on both corpora, marker false positives are gone, and no manifest reports errors.
