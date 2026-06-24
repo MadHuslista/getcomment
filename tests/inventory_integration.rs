@@ -270,3 +270,111 @@ fn python_docstrings_distinguished_from_strings() {
         "assigned string must not be treated as a docstring"
     );
 }
+
+#[test]
+fn module_docstring_scored_above_ignore_by_default() {
+    // GAP-1: module-scope docstrings carry a +3 base bonus, so they survive the
+    // default min_priority=low filter instead of falling to ignore.
+    let out = tempfile::tempdir().unwrap();
+    run_inventory(
+        "fixtures/inventory/python/docstrings.py",
+        out.path(),
+        &["--format", "jsonl"],
+    );
+    let records = read_jsonl(out.path());
+    let module_doc = records
+        .iter()
+        .find(|r| {
+            r["kind"] == "docstring"
+                && r.get("python")
+                    .and_then(|p| p.get("docstring_scope"))
+                    .and_then(|s| s.as_str())
+                    == Some("module")
+        })
+        .expect("module docstring must be present at default settings");
+    let reasons: Vec<&str> = module_doc["score_reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+    assert!(
+        reasons.contains(&"docstring attached to module"),
+        "reasons: {reasons:?}"
+    );
+}
+
+#[test]
+fn marker_not_flagged_inside_code_span() {
+    // GAP-2: ``WARNING`` enumerated in a backtick span is a value, not a marker.
+    let out = tempfile::tempdir().unwrap();
+    run_inventory(
+        "fixtures/inventory/python/docstrings.py",
+        out.path(),
+        &["--format", "jsonl", "--min-priority", "ignore"],
+    );
+    let records = read_jsonl(out.path());
+    let configure_doc = records
+        .iter()
+        .find(|r| {
+            r["normalized_text"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Console verbosity")
+        })
+        .expect("configure_logging docstring present");
+    let markers = configure_doc["markers"].as_array().unwrap();
+    assert!(
+        markers.is_empty(),
+        "no marker may fire inside a code span, got {markers:?}"
+    );
+}
+
+#[test]
+fn numpy_docstring_sections_populated() {
+    // GAP-3: NumPy underline sections populate python.docstring_sections.
+    let out = tempfile::tempdir().unwrap();
+    run_inventory(
+        "fixtures/inventory/python/docstrings.py",
+        out.path(),
+        &["--format", "jsonl", "--min-priority", "ignore"],
+    );
+    let records = read_jsonl(out.path());
+    let configure_doc = records
+        .iter()
+        .find(|r| {
+            r["normalized_text"]
+                .as_str()
+                .unwrap_or("")
+                .contains("Console verbosity")
+        })
+        .expect("configure_logging docstring present");
+    let sections = configure_doc["python"]["docstring_sections"]
+        .as_object()
+        .expect("docstring_sections object");
+    assert!(
+        sections.contains_key("Parameters"),
+        "sections: {sections:?}"
+    );
+}
+
+#[test]
+fn by_symbol_uses_module_derived_symbol() {
+    // GAP-4: module docstrings group under a dotted module symbol, not path:line.
+    let out = tempfile::tempdir().unwrap();
+    run_inventory(FIXTURES, out.path(), &["--format", "by-symbol"]);
+    let json: Value = serde_json::from_str(
+        &std::fs::read_to_string(out.path().join("comments_docstrings_by_symbol.json")).unwrap(),
+    )
+    .unwrap();
+    let symbols: Vec<&str> = json["symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["symbol"].as_str())
+        .collect();
+    assert!(
+        symbols.iter().any(|s| s.ends_with(".docstrings")),
+        "expected a module-derived symbol ending in .docstrings, got {symbols:?}"
+    );
+}

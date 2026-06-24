@@ -15,3 +15,15 @@ class DriftCorrector:
 
 ## @param level Logging level string.
 # TODO: validate timestamp alignment.
+
+
+def configure_logging(level="INFO"):
+    """Configure the package-root logger.
+
+    Parameters
+    ----------
+    level:
+        Console verbosity.  One of ``DEBUG``, ``INFO``, ``WARNING``,
+        ``ERROR``, ``CRITICAL``.  Case-insensitive.
+    """
+    return level
