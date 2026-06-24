@@ -43,6 +43,8 @@ pip-package/uncomment/__pycache__/
 
 # Documentation
 doc/
+**/.bck/
+**/*.bck
 
 # Tests
 /test-repos/
@@ -64,6 +66,7 @@ benchmarks/target/
 .windsurf/
 AGENTS.md
 CLAUDE.md
+CLAUDE.local.md
 GEMINI.md
 
 # BEGIN ai-rulez (DO NOT EDIT - managed by ai-rulez)
