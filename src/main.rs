@@ -1,13 +1,14 @@
 mod ast;
 mod cli;
 mod config;
+pub mod inventory;
 pub mod languages;
 pub mod processor;
 mod rules;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use cli::{Cli, Commands};
+use cli::{Cli, Commands, InventoryArgs};
 use config::ConfigManager;
 use glob::glob;
 use once_cell::sync::Lazy;
@@ -38,14 +39,15 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    if let Some(command) = &cli.command {
+    if let Some(command) = cli.command {
         return match command {
             Commands::Init {
                 output,
                 force,
                 comprehensive,
                 interactive,
-            } => Cli::handle_init_command(output, *force, *comprehensive, *interactive),
+            } => Cli::handle_init_command(&output, force, comprehensive, interactive),
+            Commands::Inventory(args) => run_inventory(args),
         };
     }
 
@@ -175,6 +177,96 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn run_inventory(args: InventoryArgs) -> Result<()> {
+    if args.paths.is_empty() {
+        eprintln!("Error: No input paths specified for inventory.");
+        std::process::exit(1);
+    }
+
+    let mut options = args.into_options();
+    apply_inventory_config_defaults(&mut options);
+    let result = inventory::run(&options).context("inventory run failed")?;
+
+    println!(
+        "Inventory: {} record(s) from {} file(s) ({} with records) -> {}",
+        result.records,
+        result.files_scanned,
+        result.files_with_records,
+        options.output_dir.display()
+    );
+    if result.suppressed > 0 {
+        println!(
+            "Suppressed {} generated/vendor record(s) (use --include-generated to keep).",
+            result.suppressed
+        );
+    }
+    for error in &result.errors {
+        eprintln!("inventory warning: {error}");
+    }
+
+    Ok(())
+}
+
+/// Apply `[inventory]` config defaults beneath CLI flags.
+///
+/// CLI flags take precedence; config only fills fields still at their built-in
+/// default value (configuration-system precedence rule).
+fn apply_inventory_config_defaults(options: &mut inventory::InventoryOptions) {
+    use inventory::{InventoryFormat, InventoryOptions};
+
+    let local = std::path::Path::new(".uncommentrc.toml");
+    let Ok(text) = std::fs::read_to_string(local) else {
+        return;
+    };
+    let Ok(config) = toml::from_str::<config::Config>(&text) else {
+        return;
+    };
+    let Some(inv) = config.inventory else {
+        return;
+    };
+
+    let defaults = InventoryOptions::default();
+
+    if options.output_dir == defaults.output_dir
+        && let Some(dir) = inv.output_dir
+    {
+        options.output_dir = std::path::PathBuf::from(dir);
+    }
+    if options.formats == defaults.formats && !inv.formats.is_empty() {
+        let parsed: Vec<InventoryFormat> = inv
+            .formats
+            .iter()
+            .filter_map(|f| match f.as_str() {
+                "jsonl" => Some(InventoryFormat::Jsonl),
+                "markdown" => Some(InventoryFormat::Markdown),
+                "summary" => Some(InventoryFormat::Summary),
+                "by-symbol" => Some(InventoryFormat::BySymbol),
+                _ => None,
+            })
+            .collect();
+        if !parsed.is_empty() {
+            options.formats = parsed;
+        }
+    }
+    if options.languages == defaults.languages && !inv.languages.is_empty() {
+        options.languages = inv.languages;
+    }
+    if options.min_priority == defaults.min_priority
+        && let Some(p) = inv.min_priority.as_deref()
+    {
+        options.min_priority = match p {
+            "ignore" => inventory::model::Priority::Ignore,
+            "low" => inventory::model::Priority::Low,
+            "medium" => inventory::model::Priority::Medium,
+            "high" => inventory::model::Priority::High,
+            _ => options.min_priority,
+        };
+    }
+    if inv.include_generated {
+        options.include_generated = true;
+    }
 }
 
 fn collect_files(
