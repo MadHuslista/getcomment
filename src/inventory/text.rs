@@ -73,15 +73,75 @@ const DOMAIN_TERMS: &[&str] = &[
 ];
 
 /// Extract distinct attention markers present in `text`, in canonical order.
+///
+/// Inline-code spans are stripped first: a marker word enumerated inside a
+/// backtick span (e.g. reST `` ``WARNING`` `` listing valid log levels) is
+/// describing a value, not flagging risk, and must not produce a false hit.
 #[must_use]
 pub fn markers(text: &str) -> Vec<String> {
+    let scanned = strip_code_spans(text);
     let mut found = Vec::new();
     for marker in MARKERS {
-        if contains_word(text, marker) && !found.iter().any(|m| m == marker) {
+        if contains_word(&scanned, marker) && !found.iter().any(|m| m == marker) {
             found.push((*marker).to_string());
         }
     }
     found
+}
+
+/// Remove backtick-delimited inline-code spans, replacing each with a space so
+/// surrounding word boundaries are preserved. Matches the Markdown rule: an
+/// opening run of N backticks is closed by the next run of exactly N backticks
+/// (handles single `` ` `` and reST double `` `` `` delimiters). An unterminated
+/// run is left intact.
+#[must_use]
+fn strip_code_spans(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] != '`' {
+            out.push(chars[i]);
+            i += 1;
+            continue;
+        }
+        // Length of the opening backtick run.
+        let mut n = 0;
+        while i + n < chars.len() && chars[i + n] == '`' {
+            n += 1;
+        }
+        // Find a closing run of exactly n backticks.
+        let mut j = i + n;
+        let mut close = None;
+        while j < chars.len() {
+            if chars[j] == '`' {
+                let mut m = 0;
+                while j + m < chars.len() && chars[j + m] == '`' {
+                    m += 1;
+                }
+                if m == n {
+                    close = Some(j + m);
+                    break;
+                }
+                j += m;
+            } else {
+                j += 1;
+            }
+        }
+        match close {
+            Some(end) => {
+                out.push(' ');
+                i = end;
+            }
+            None => {
+                for _ in 0..n {
+                    out.push('`');
+                }
+                i += n;
+            }
+        }
+    }
+    out
 }
 
 /// Extract requirement-traceability identifiers (`FR-001`, `US-42`, `Bug #7`).
@@ -250,6 +310,16 @@ mod tests {
             markers("DEPRECATED LEGACY path"),
             vec!["DEPRECATED", "LEGACY"]
         );
+    }
+
+    #[test]
+    fn markers_ignores_code_span_enumerations() {
+        // GAP-2: marker words enumerated inside backtick spans are values, not
+        // risk flags (reST docstring listing valid log levels).
+        assert!(markers("One of ``DEBUG``, ``INFO``, ``WARNING``, ``ERROR``.").is_empty());
+        assert!(markers("set level to `WARNING` here").is_empty());
+        // A genuine marker outside any code span still fires.
+        assert_eq!(markers("WARNING: real risk in `mode`"), vec!["WARNING"]);
     }
 
     #[test]
